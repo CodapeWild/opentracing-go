@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package universal.opentracing.transformer;
+
+option go_package = "github.com/CodapeWild/universal-opentracing-transformer/;uniottrans";
+
+enum SpanStatus {
+  OK = 0;
+  Error = 1;
+  Recovery = 2;
+  Crash = 3;
+}
+
+message Numeric {
+  oneof Numeric {
+    int32 int32value = 1;
+    int64 int64value = 2;
+    float floatvalue = 3;
+    double doublevalue = 4;
+    uint32 uint32value = 5;
+    uint64 uint64value = 6;
+  }
+}
+
+message Span {
+  string TraceID = 1;
+  string ParentID = 2;
+  string SpanID = 3;
+  string Service = 4;
+  string Operation = 5;
+  map<string, string> Meta = 6;
+  map<string, Numeric> Metrics = 7;
+  SpanStatus Status = 8;
+  int64 Start = 9;
+  int64 End = 10;
+}
+
+message Trace {
+  repeated Span Trace = 1;
+}
+
+message Traces {
+  repeated Trace Traces = 1;
+}
