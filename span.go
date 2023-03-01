@@ -117,3 +117,29 @@ func (sp *Span) LogEventWithPayload(event string, payload interface{}) {}
 
 // Deprecated: use LogFields or LogKV
 func (sp *Span) Log(data opentracing.LogData) {}
+
+func (sp *Span) MergeMeta(extra ...map[string]string) {
+	if sp.Meta == nil {
+		sp.Meta = make(map[string]string)
+	}
+
+	for _, m := range extra {
+		for k, v := range m {
+			sp.Meta[k] = v
+		}
+	}
+}
+
+func (sp *Span) MergeMetrics(extra ...map[string]*Numeric) {
+	if sp.Metrics == nil {
+		sp.Metrics = make(map[string]*Numeric)
+	}
+
+	for _, m := range extra {
+		for k, v := range m {
+			if v != nil {
+				sp.Metrics[k] = v
+			}
+		}
+	}
+}
