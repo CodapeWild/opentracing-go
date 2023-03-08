@@ -2,6 +2,8 @@ package uniottrans
 
 import (
 	"errors"
+
+	"github.com/opentracing/opentracing-go"
 )
 
 type TraceNative interface {
@@ -17,13 +19,14 @@ type SpanNative interface {
 	GetMeta() map[string]string
 	GetMetrics() map[string]*Numeric
 	GetSpanStatus() SpanStatus
-	GetStart() int64
-	GetEnd() int64
+	GetStartTime() int64
+	GetEndTime() int64
 }
 
 type Decoder func(bts []byte) ([]TraceNative, error)
 
 type UniversalTransformer interface {
+	opentracing.Tracer
 	SetDecoder(deocder Decoder)
 	BeforeBuildSpan(native SpanNative)
 	BuildSpan(native SpanNative) *Span
@@ -32,7 +35,12 @@ type UniversalTransformer interface {
 }
 
 type RawTransformer struct {
+	*Tracer
 	Decoder
+}
+
+func (def *RawTransformer) SetTracer(tracer *Tracer) {
+	def.Tracer = tracer
 }
 
 func (def *RawTransformer) SetDecoder(decoder Decoder) {
@@ -51,14 +59,14 @@ func (def *RawTransformer) BuildSpan(native SpanNative) *Span {
 		Meta:      native.GetMeta(),
 		Metrics:   native.GetMetrics(),
 		Status:    native.GetSpanStatus(),
-		Start:     native.GetStart(),
-		End:       native.GetEnd(),
+		StartTime: native.GetStartTime(),
+		EndTime:   native.GetEndTime(),
 	}
 }
 
 func (def *RawTransformer) AfterBuildSpan(native SpanNative, span *Span) {}
 
-func (def *RawTransformer) Transform(bts []byte, before, after func()) (*Traces, error) {
+func (def *RawTransformer) Transform(bts []byte) (*Traces, error) {
 	if def.Decoder == nil {
 		return nil, errors.New("decoder: nil")
 	}

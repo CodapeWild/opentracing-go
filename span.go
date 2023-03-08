@@ -143,3 +143,28 @@ func (sp *Span) MergeMetrics(extra ...map[string]*Numeric) {
 		}
 	}
 }
+
+type StartSpanOption func(span *Span)
+
+func (sso StartSpanOption) Apply(opts *opentracing.StartSpanOptions) {}
+
+func WithStartTime(ts int64) StartSpanOption {
+	return func(span *Span) {
+		span.StartTime = ts
+	}
+}
+
+func WithStartSpanMeta(meta map[string]string) StartSpanOption {
+	return func(span *Span) {
+		if span.Meta == nil {
+			span.Meta = make(map[string]string)
+		}
+		for k, v := range meta {
+			span.Meta[k] = v
+		}
+	}
+}
+
+func WithParentSpanContext(spctx *SpanContext) StartSpanOption {
+	return func(span *Span) {}
+}
