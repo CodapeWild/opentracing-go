@@ -147,6 +147,8 @@ func (sp *Span) Tracer() opentracing.Tracer {
 			return t
 		}
 	}
+
+	return defGlobalTracer
 }
 
 // Deprecated: use LogFields or LogKV
