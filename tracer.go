@@ -1,6 +1,7 @@
 package uniottrans
 
 import (
+	"errors"
 	"math/rand"
 	"os"
 	"strconv"
@@ -11,53 +12,91 @@ import (
 )
 
 const (
-	MaxBufferSize = 1024
-	MaxThreads    = 8
+	DefService       = "UniversalOpenTracingTransform"
+	DefFlushBuffer   = 1024
+	DefFlushInterval = 3 * time.Second
 )
+
+var defGlobalTracer *Tracer
 
 type StartTracerOption func(tracer *Tracer)
 
-func WithBufferSize(size int) StartTracerOption {
+func WithSampleRatio(ratio float64) StartTracerOption {
 	return func(tracer *Tracer) {
-
+		tracer.sampler = CommonSampler(ratio)
 	}
 }
 
-func WithThreads(num int) StartTracerOption {
+func WithGlobalTags(tags map[string]interface{}) StartTracerOption {
 	return func(tracer *Tracer) {
-
+		if &tracer.tags == &tags {
+			return
+		}
+		if tracer.tags == nil {
+			tracer.tags = make(map[string]interface{})
+		}
+		for k, v := range tags {
+			tracer.tags[k] = v
+		}
 	}
 }
 
-func WithService(name string) StartTracerOption {
+func WithFlushBuffer(size int) StartTracerOption {
 	return func(tracer *Tracer) {
-
+		if size <= 0 {
+			size = DefFlushBuffer
+		}
+		tracer.finished = make(chan *Span, size)
 	}
 }
 
-func WithMeta(meta map[string]string) StartTracerOption {
+func WithFlushInterval(d time.Duration) StartTracerOption {
 	return func(tracer *Tracer) {
-
+		tracer.flushInterval = d
 	}
 }
 
-func WithSampleRatio(ratio int) StartTracerOption {
-	return func(tracer *Tracer) {
-
+func NewTracer(service string, opts ...StartTracerOption) *Tracer {
+	envs := getEnvPairs()
+	if s, ok := envs[ServiceNameKey]; ok {
+		service = s
 	}
-}
 
-func NewTracer(opts ...StartTracerOption) *Tracer {
+	if service == "" {
+		service = DefService
+	}
+	tracer := &Tracer{service: service}
+	for i := range opts {
+		opts[i](tracer)
+	}
+	if tracer.finished == nil {
+		tracer.finished = make(chan *Span, DefFlushBuffer)
+	}
+	if tracer.flushInterval <= 0 {
+		tracer.flushInterval = DefFlushInterval
+	}
+	tracer.flush = make(chan struct{})
+	tracer.close = make(chan struct{})
 
+	if tracer.sampler == nil {
+		if p, ok := envs[SampleRatioKey]; ok {
+			if ratio, err := strconv.ParseFloat(p, 10); err == nil {
+				tracer.sampler = CommonSampler(ratio)
+			}
+		}
+	}
+
+	return tracer
 }
 
 type Tracer struct {
-	buffer, threads int
-	service         string
-	meta            map[string]string
-	sampleRatio     int
-	flush           chan struct{}
-	close           chan struct{}
+	service       string
+	sampler       Sampler
+	tags          map[string]interface{}
+	finished      chan *Span
+	flush         chan struct{}
+	flushInterval time.Duration
+	close         chan struct{}
 }
 
 // Create, start, and return a new Span with the given `operationName` and
@@ -88,17 +127,50 @@ type Tracer struct {
 //         opentracing.StartTime(loggedReq.Timestamp),
 //     )
 //
-func (t *Tracer) StartSpan(operationName string, opts ...opentracing.StartSpanOption) opentracing.Span {
-	var (
-		now = time.Now().UnixNano()
-		id  = strconv.FormatInt(newID(now), 10)
-	)
-	sp := &Span{
-		TraceID:   id,
-		ParentID:  "0",
-		SpanID:    id,
-		StartTime: now,
+func (tcr *Tracer) StartSpan(operationName string, opts ...opentracing.StartSpanOption) opentracing.Span {
+	ssopts := &opentracing.StartSpanOptions{}
+	for i := range opts {
+		opts[i].Apply(ssopts)
 	}
+
+	var spctx *SpanContext
+	if len(ssopts.References) > 0 {
+		spctx = ssopts.References[0].ReferencedContext.(*SpanContext)
+	}
+
+	var start int64
+	if ssopts.StartTime.IsZero() {
+		start = time.Now().UnixNano()
+	} else {
+		start = ssopts.StartTime.UnixNano()
+	}
+
+	sp := &Span{
+		Service:   tcr.service,
+		StartTime: start,
+	}
+	sp.SetTags(tcr.tags)
+	sp.SetTags(ssopts.Tags)
+
+	if spctx != nil {
+		sp.TraceID = spctx.TraceID
+		sp.ParentID = spctx.ParentID
+		for k, v := range spctx.Meta {
+			sp.SetTag(k, v)
+		}
+		if sp.ParentID == 0 {
+			sp.SetTag(SamplePriorityKey, &Numeric_Int32Value{Int32Value: int32(spctx.SamplePriority)})
+			sp.SetTag(SampleRatioKey, &Numeric_Doublevalue{Doublevalue: spctx.SampleRatio})
+		}
+	} else {
+		sp.TraceID = newID(sp.StartTime)
+		sp.ParentID = 0
+		if tcr.sampler != nil {
+			sp.SetTag(SamplePriorityKey, &Numeric_Int32Value{Int32Value: int32(SamplePriority_AutoKeep)})
+			sp.SetTag(SampleRatioKey, &Numeric_Doublevalue{Doublevalue: tcr.sampler.Ratio()})
+		}
+	}
+	sp.SpanID = newID(time.Now().UnixNano())
 
 	return sp
 }
@@ -132,7 +204,7 @@ func (t *Tracer) StartSpan(operationName string, opts ...opentracing.StartSpanOp
 // fails anyway.
 //
 // See Tracer.Extract().
-func (t *Tracer) Inject(sm opentracing.SpanContext, format interface{}, carrier interface{}) error {
+func (tcr *Tracer) Inject(sm opentracing.SpanContext, format interface{}, carrier interface{}) error {
 	return nil
 }
 
@@ -177,24 +249,58 @@ func (t *Tracer) Inject(sm opentracing.SpanContext, format interface{}, carrier 
 //    errors.
 //
 // See Tracer.Inject().
-func (t *Tracer) Extract(format interface{}, carrier interface{}) (opentracing.SpanContext, error) {
+func (tcr *Tracer) Extract(format interface{}, carrier interface{}) (opentracing.SpanContext, error) {
 	return nil, nil
 }
 
-func (t *Tracer) Start() {
+func (tcr *Tracer) Start() {
+	go func() {
+		ticker := time.NewTicker(tcr.flushInterval)
+		for {
+			select {
+			case <-tcr.close:
+				return
+			default:
+			}
 
+			select {
+			case <-tcr.flush:
+			case <-ticker.C:
+			case <-tcr.close:
+				return
+			}
+		}
+	}()
 }
 
-func (t *Tracer) Flush() {
-
+func (tcr *Tracer) Flush() {
+	tcr.flush <- struct{}{}
 }
 
-func (t *Tracer) Close() {
-
+func (tcr *Tracer) Close() {
+	select {
+	case <-tcr.close:
+	default:
+		close(tcr.close)
+	}
 }
 
-func newID(start int64) int64 {
-	return rand.Int63() ^ start
+func (tcr *Tracer) finishSpan(span *Span) error {
+	timeout := time.NewTimer(time.Second)
+	for {
+		select {
+		case tcr.finished <- span:
+			return nil
+		case <-timeout.C:
+			return errors.New("finish span timeout")
+		default:
+			tcr.Flush()
+		}
+	}
+}
+
+func (tcr *Tracer) doFlush() {
+
 }
 
 func getEnvPairs() map[string]string {
@@ -209,6 +315,10 @@ func getEnvPairs() map[string]string {
 	}
 
 	return m
+}
+
+func newID(start int64) int64 {
+	return rand.Int63() ^ start
 }
 
 func init() {

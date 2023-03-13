@@ -7,9 +7,9 @@ option go_package = "github.com/CodapeWild/universal-opentracing-transformer/;un
 import "span.proto";
 
 message SpanContext {
-  string TraceID = 1;
-  string ParentID = 2;
+  int64 TraceID = 1;
+  int64 ParentID = 2;
   SamplePriority SamplePriority = 3;
-  int32 SampleRatio = 4;
+  double SampleRatio = 4;
   map<string, string> Meta = 5;
 }

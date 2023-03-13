@@ -11,9 +11,9 @@ type TraceNative interface {
 }
 
 type SpanNative interface {
-	GetTraceID() string
-	GetParentID() string
-	GetSpanID() string
+	GetTraceID() int64
+	GetParentID() int64
+	GetSpanID() int64
 	GetService() string
 	GetOperation() string
 	GetMeta() map[string]string

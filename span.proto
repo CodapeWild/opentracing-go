@@ -42,9 +42,9 @@ message Numeric {
 }
 
 message Span {
-  string TraceID = 1;
-  string ParentID = 2;
-  string SpanID = 3;
+  int64 TraceID = 1;
+  int64 ParentID = 2;
+  int64 SpanID = 3;
   string Service = 4;
   string Operation = 5;
   map<string, string> Meta = 7;

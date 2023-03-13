@@ -1,18 +1,23 @@
 package uniottrans
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/opentracing/opentracing-go"
 	"github.com/opentracing/opentracing-go/log"
 )
 
-var _ opentracing.Span = &Span{}
+var _ opentracing.Span = (*Span)(nil)
 
 // Sets the end timestamp and finalizes Span state.
 //
 // With the exception of calls to Context() (which are always allowed),
 // Finish() must be the last call made to any span instance, and to do
 // otherwise leads to undefined behavior.
-func (sp *Span) Finish() {}
+func (sp *Span) Finish() {
+
+}
 
 // FinishWithOptions is like Finish() but with explicit control over
 // timestamps and log data.
@@ -32,6 +37,14 @@ func (sp *Span) SetOperationName(operationName string) opentracing.Span {
 	return sp
 }
 
+func (sp *Span) SetTags(tags map[string]interface{}) opentracing.Span {
+	for k, v := range tags {
+		sp.SetTag(k, v)
+	}
+
+	return sp
+}
+
 // Adds a tag to the span.
 //
 // If there is a pre-existing tag set for `key`, it is overwritten.
@@ -43,6 +56,28 @@ func (sp *Span) SetOperationName(operationName string) opentracing.Span {
 //
 // Returns a reference to this Span for chaining.
 func (sp *Span) SetTag(key string, value interface{}) opentracing.Span {
+	switch value.(type) {
+	case *Numeric:
+		if sp.Metrics == nil {
+			sp.Metrics = make(map[string]*Numeric)
+		}
+	default:
+		if sp.Meta == nil {
+			sp.Meta = make(map[string]string)
+		}
+	}
+
+	switch t := value.(type) {
+	case string:
+		sp.Meta[key] = t
+	case []byte:
+		sp.Meta[key] = string(t)
+	case *Numeric:
+		sp.Metrics[key] = t
+	default:
+		sp.Meta[key] = fmt.Sprintf("%v", t)
+	}
+
 	return sp
 }
 
@@ -106,7 +141,12 @@ func (sp *Span) BaggageItem(restrictedKey string) string {
 
 // Provides access to the Tracer that created this Span.
 func (sp *Span) Tracer() opentracing.Tracer {
-	return nil
+	gtracer := opentracing.GlobalTracer()
+	if gtracer != nil {
+		if t, ok := gtracer.(*Tracer); ok {
+			return t
+		}
+	}
 }
 
 // Deprecated: use LogFields or LogKV
@@ -118,53 +158,39 @@ func (sp *Span) LogEventWithPayload(event string, payload interface{}) {}
 // Deprecated: use LogFields or LogKV
 func (sp *Span) Log(data opentracing.LogData) {}
 
-func (sp *Span) MergeMeta(extra ...map[string]string) {
-	if sp.Meta == nil {
-		sp.Meta = make(map[string]string)
-	}
+// func splitTags(tags map[string]interface{}) (map[string]string, map[string]*Numeric) {
+// 	var (
+// 		meta    = make(map[string]string)
+// 		metrics = make(map[string]*Numeric)
+// 	)
+// 	for k, v := range tags {
+// 		switch t := v.(type) {
+// 		case string:
+// 			meta[k] = t
+// 		case []byte:
+// 			meta[k] = string(t)
+// 		case *Numeric:
+// 			metrics[k] = t
+// 		default:
+// 			meta[k] = fmt.Sprintf("%v", t)
+// 		}
+// 	}
 
-	for _, m := range extra {
-		for k, v := range m {
-			sp.Meta[k] = v
-		}
-	}
+// 	return meta, metrics
+// }
+
+func WithSpanContext(spctx SpanContext) opentracing.SpanReference {
+	return opentracing.ChildOf(&spctx)
 }
 
-func (sp *Span) MergeMetrics(extra ...map[string]*Numeric) {
-	if sp.Metrics == nil {
-		sp.Metrics = make(map[string]*Numeric)
-	}
-
-	for _, m := range extra {
-		for k, v := range m {
-			if v != nil {
-				sp.Metrics[k] = v
-			}
-		}
-	}
+func WithSpanTags(tags map[string]interface{}) opentracing.Tags {
+	return tags
 }
 
-type StartSpanOption func(span *Span)
-
-func (sso StartSpanOption) Apply(opts *opentracing.StartSpanOptions) {}
-
-func WithStartTime(ts int64) StartSpanOption {
-	return func(span *Span) {
-		span.StartTime = ts
-	}
+func WithStartTime(ts int64) opentracing.StartTime {
+	return opentracing.StartTime(time.Unix(0, ts))
 }
 
-func WithStartSpanMeta(meta map[string]string) StartSpanOption {
-	return func(span *Span) {
-		if span.Meta == nil {
-			span.Meta = make(map[string]string)
-		}
-		for k, v := range meta {
-			span.Meta[k] = v
-		}
-	}
-}
-
-func WithParentSpanContext(spctx *SpanContext) StartSpanOption {
-	return func(span *Span) {}
+func WithExternalTraceID(tid interface{}) *opentracing.Tag {
+	return &opentracing.Tag{Key: ExternalTraceID, Value: tid}
 }
