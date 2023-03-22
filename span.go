@@ -16,7 +16,20 @@ var _ opentracing.Span = (*Span)(nil)
 // Finish() must be the last call made to any span instance, and to do
 // otherwise leads to undefined behavior.
 func (sp *Span) Finish() {
+	tcr := sp.Tracer()
+	if tcr == nil {
+		return
+	}
+	tracer, ok := tcr.(*Tracer)
+	if !ok {
+		return
+	}
+	sp.EndTime = time.Now().UnixNano()
 
+	if err := tracer.finishSpan(sp); err != nil {
+		// log.Println(err.Error())
+		fmt.Println(err.Error())
+	}
 }
 
 // FinishWithOptions is like Finish() but with explicit control over
@@ -27,7 +40,18 @@ func (sp *Span) FinishWithOptions(opts opentracing.FinishOptions) {}
 // value of Context() is still valid after a call to Span.Finish(), as is
 // a call to Span.Context() after a call to Span.Finish().
 func (sp *Span) Context() opentracing.SpanContext {
-	return nil
+	spctx := &SpanContext{
+		TraceID:  sp.TraceID,
+		ParentID: sp.SpanID,
+	}
+	if p, ok := sp.Metrics[SamplePriorityKey]; ok {
+		spctx.SamplePriority = SamplePriority(p.GetInt32Value())
+	}
+	if r, ok := sp.Metrics[SampleRatioKey]; ok {
+		spctx.SampleRatio = r.GetDoublevalue()
+	}
+
+	return spctx
 }
 
 // Sets or changes the operation name.

@@ -2,6 +2,7 @@ package uniottrans
 
 import (
 	"errors"
+	"fmt"
 	"math/rand"
 	"os"
 	"strconv"
@@ -17,7 +18,9 @@ const (
 	DefFlushInterval = 3 * time.Second
 )
 
-var defGlobalTracer *Tracer
+var (
+	defGlobalTracer *Tracer
+)
 
 type StartTracerOption func(tracer *Tracer)
 
@@ -56,6 +59,12 @@ func WithFlushInterval(d time.Duration) StartTracerOption {
 	}
 }
 
+func WithEndpoint(endpoint Exporter) StartTracerOption {
+	return func(tracer *Tracer) {
+		tracer.endpoint = endpoint
+	}
+}
+
 func NewTracer(service string, opts ...StartTracerOption) *Tracer {
 	envs := getEnvPairs()
 	if s, ok := envs[ServiceNameKey]; ok {
@@ -86,6 +95,10 @@ func NewTracer(service string, opts ...StartTracerOption) *Tracer {
 		}
 	}
 
+	if tracer.endpoint == nil {
+		tracer.endpoint = &NullExporter{}
+	}
+
 	return tracer
 }
 
@@ -96,6 +109,7 @@ type Tracer struct {
 	finished      chan *Span
 	flush         chan struct{}
 	flushInterval time.Duration
+	endpoint      Exporter
 	close         chan struct{}
 }
 
@@ -263,11 +277,17 @@ func (tcr *Tracer) Start() {
 			default:
 			}
 
+			var err error
 			select {
 			case <-tcr.flush:
+				err = tcr.doFlush()
 			case <-ticker.C:
+				err = tcr.doFlush()
 			case <-tcr.close:
 				return
+			}
+			if err != nil {
+				fmt.Println(err.Error())
 			}
 		}
 	}()
@@ -299,8 +319,18 @@ func (tcr *Tracer) finishSpan(span *Span) error {
 	}
 }
 
-func (tcr *Tracer) doFlush() {
+func (tcr *Tracer) doFlush() error {
+	l := len(tcr.finished)
+	if l == 0 {
+		return nil
+	}
 
+	trace := &Trace{Trace: make([]*Span, l)}
+	for i := 0; i < l; i++ {
+		trace.Trace[i] = <-tcr.finished
+	}
+
+	return tcr.endpoint.Export(trace)
 }
 
 func getEnvPairs() map[string]string {
@@ -322,5 +352,7 @@ func newID(start int64) int64 {
 }
 
 func init() {
+	// log.SetOutput(os.Stdout)
+	// log.SetFlags(log.LstdFlags | log.Lshortfile)
 	rand.Seed(time.Now().UnixNano())
 }
