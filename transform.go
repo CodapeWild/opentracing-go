@@ -23,6 +23,11 @@ type SpanNative interface {
 	GetEndTime() int64
 }
 
+type SpanTransform interface {
+	StartSpan()
+	SetTag(key string, value interface{}) opentracing.Span
+}
+
 type Decoder func(bts []byte) ([]TraceNative, error)
 
 type UniversalTransformer interface {
