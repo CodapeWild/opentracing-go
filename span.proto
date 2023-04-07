@@ -34,10 +34,10 @@ message Numeric {
   oneof Numeric {
     int32 int32value = 1;
     int64 int64value = 2;
-    float floatvalue = 3;
-    double doublevalue = 4;
-    uint32 uint32value = 5;
-    uint64 uint64value = 6;
+    uint32 uint32value = 3;
+    uint64 uint64value = 4;
+    float floatvalue = 5;
+    double doublevalue = 6;
   }
 }
 
