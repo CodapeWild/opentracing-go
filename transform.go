@@ -1,9 +1,11 @@
 package uniottrans
 
 import (
-	"errors"
-
-	"github.com/opentracing/opentracing-go"
+	"encoding/json"
+	"io"
+	"log"
+	"net/http"
+	"os"
 )
 
 type TraceNative interface {
@@ -23,75 +25,54 @@ type SpanNative interface {
 	GetEndTime() int64
 }
 
+type Decoder func(body io.Reader) SpanNative
+
 type SpanTransform interface {
-	StartSpan()
-	SetTag(key string, value interface{}) opentracing.Span
+	RegisterDecoder(contentType string, decoder Decoder)
+	BuildSpanFrom(native SpanNative) Span
 }
 
-type Decoder func(bts []byte) ([]TraceNative, error)
-
-type UniversalTransformer interface {
-	opentracing.Tracer
-	SetDecoder(deocder Decoder)
-	BeforeBuildSpan(native SpanNative)
-	BuildSpan(native SpanNative) *Span
-	AfterBuildSpan(native SpanNative, span *Span)
-	Transform(bts []byte) (*Traces, error)
+type SpanTransformServerConfig struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
 }
 
-type RawTransformer struct {
-	*Tracer
-	Decoder
+func (svr *SpanTransformServerConfig) newSpanTransformServer() *SpanTransformServer {
+
 }
 
-func (def *RawTransformer) SetTracer(tracer *Tracer) {
-	def.Tracer = tracer
+type SpanTransformServer struct {
+	mux *http.ServeMux
 }
 
-func (def *RawTransformer) SetDecoder(decoder Decoder) {
-	def.Decoder = decoder
+func (sts *SpanTransformServer) BuildSpanFrom(native SpanNative) Span {
+	svr := http.NewServeMux()
+	http.ListenAndServe("", svr)
 }
 
-func (def *RawTransformer) BeforeBuildSpan(native SpanNative) {}
+const (
+	config_path = "OTTF_CONFIG_PATH"
+	address     = "OTTF_ADDRESS"
+)
 
-func (def *RawTransformer) BuildSpan(native SpanNative) *Span {
-	return &Span{
-		TraceID:   native.GetTraceID(),
-		ParentID:  native.GetParentID(),
-		SpanID:    native.GetSpanID(),
-		Service:   native.GetService(),
-		Operation: native.GetOperation(),
-		Meta:      native.GetMeta(),
-		Metrics:   native.GetMetrics(),
-		Status:    native.GetSpanStatus(),
-		StartTime: native.GetStartTime(),
-		EndTime:   native.GetEndTime(),
+func init() {
+	log.SetOutput(os.Stdout)
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	v, ok := os.LookupEnv(config_path)
+	if !ok {
+		v = "./config.json"
 	}
-}
-
-func (def *RawTransformer) AfterBuildSpan(native SpanNative, span *Span) {}
-
-func (def *RawTransformer) Transform(bts []byte) (*Traces, error) {
-	if def.Decoder == nil {
-		return nil, errors.New("decoder: nil")
+	if _, err := os.Stat(v); os.IsNotExist(err) {
+		log.Fatalln("config file not exists")
 	}
 
-	tracesNative, err := def.Decoder(bts)
-	if err != nil {
-		return nil, err
+	config := &SpanTransformServerConfig{}
+	if bts, err := os.ReadFile(v); err != nil {
+		log.Fatalln(err.Error())
+	} else {
+		if err = json.Unmarshal(bts, config); err != nil {
+			log.Println("load config file failed with error: %s", err.Error())
+		}
 	}
-
-	var traces *Traces = &Traces{}
-	for _, traceNative := range tracesNative {
-		var trace *Trace = &Trace{}
-		traceNative.Foreach(func(native SpanNative) {
-			def.BeforeBuildSpan(native)
-			span := def.BuildSpan(native)
-			def.AfterBuildSpan(native, span)
-			trace.Trace = append(trace.Trace, span)
-		})
-		traces.Traces = append(traces.Traces, trace)
-	}
-
-	return traces, nil
 }

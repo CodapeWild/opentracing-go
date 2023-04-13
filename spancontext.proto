@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package universal.opentracing.transformer;
+package opentracing.transformer;
 
 option go_package = "github.com/CodapeWild/universal-opentracing-transformer/;uniottrans";
 
