@@ -1,4 +1,4 @@
-package uniottrans
+package optcgo
 
 import (
 	"errors"
@@ -59,12 +59,6 @@ func WithFlushInterval(d time.Duration) StartTracerOption {
 	}
 }
 
-func WithEndpoint(endpoint Exporter) StartTracerOption {
-	return func(tracer *Tracer) {
-		tracer.endpoint = endpoint
-	}
-}
-
 func NewTracer(service string, opts ...StartTracerOption) *Tracer {
 	envs := getEnvPairs()
 	if s, ok := envs[ServiceNameKey]; ok {
@@ -95,10 +89,6 @@ func NewTracer(service string, opts ...StartTracerOption) *Tracer {
 		}
 	}
 
-	if tracer.endpoint == nil {
-		tracer.endpoint = &NullExporter{}
-	}
-
 	return tracer
 }
 
@@ -109,7 +99,6 @@ type Tracer struct {
 	finished      chan *Span
 	flush         chan struct{}
 	flushInterval time.Duration
-	endpoint      Exporter
 	close         chan struct{}
 }
 
@@ -147,16 +136,21 @@ func (tcr *Tracer) StartSpan(operationName string, opts ...opentracing.StartSpan
 		opts[i].Apply(ssopts)
 	}
 
-	var spctx *SpanContext
-	if len(ssopts.References) > 0 {
-		spctx = ssopts.References[0].ReferencedContext.(*SpanContext)
-	}
-
 	var start int64
 	if ssopts.StartTime.IsZero() {
 		start = time.Now().UnixNano()
 	} else {
 		start = ssopts.StartTime.UnixNano()
+	}
+
+	var span = &Span{SpanID: newID(start)}
+	if len(ssopts.References) > 0 {
+		spctx := ssopts.References[0].ReferencedContext.(*SpanContext)
+		span.TraceID = spctx.TraceID
+		span.ParentID = spctx.ParentID
+		for k, v := range spctx.Meta {
+			span.SetTag(k, v)
+		}
 	}
 
 	sp := &Span{

@@ -1,24 +1,14 @@
 syntax = "proto3";
 
-package opentracing.transformer;
+package opentracing.go;
 
-option go_package = "github.com/CodapeWild/universal-opentracing-transformer/;uniottrans";
+option go_package = "github.com/CodapeWild/opentracing-go/;optcgo";
 
 enum SpanStatus {
   OK = 0;
   Error = 1;
   Recovery = 2;
-  Crash = 3;
-}
-
-enum DataSource {
-  Customer = 0;
-  DataDog = 1;
-  Jaeger = 2;
-  OpenTelemetry = 3;
-  Pinpoint = 4;
-  SkyWalking = 5;
-  Zipkin = 6;
+  Crisis = 3;
 }
 
 enum SamplePriority {

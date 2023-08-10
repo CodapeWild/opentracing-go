@@ -1,4 +1,4 @@
-package uniottrans
+package optcgo
 
 import (
 	"fmt"
@@ -61,6 +61,27 @@ func (sp *Span) SetOperationName(operationName string) opentracing.Span {
 	return sp
 }
 
+func (sp *Span) SetMeta(key, value string) opentracing.Span {
+	if sp.Meta == nil {
+		sp.Meta = make(map[string]string)
+	}
+	sp.Meta[key] = value
+
+	return sp
+}
+
+func (sp *Span) SetMetric(key string, number *Numeric) opentracing.Span {
+	if number == nil {
+		return sp
+	}
+	if sp.Metrics == nil {
+		sp.Metrics = make(map[string]*Numeric)
+	}
+	sp.Metrics[key] = number
+
+	return sp
+}
+
 func (sp *Span) SetTags(tags map[string]interface{}) opentracing.Span {
 	for k, v := range tags {
 		sp.SetTag(k, v)
@@ -80,26 +101,15 @@ func (sp *Span) SetTags(tags map[string]interface{}) opentracing.Span {
 //
 // Returns a reference to this Span for chaining.
 func (sp *Span) SetTag(key string, value interface{}) opentracing.Span {
-	switch value.(type) {
-	case *Numeric:
-		if sp.Metrics == nil {
-			sp.Metrics = make(map[string]*Numeric)
-		}
-	default:
-		if sp.Meta == nil {
-			sp.Meta = make(map[string]string)
-		}
-	}
-
 	switch t := value.(type) {
-	case string:
-		sp.Meta[key] = t
-	case []byte:
-		sp.Meta[key] = string(t)
 	case *Numeric:
-		sp.Metrics[key] = t
+		sp.SetMetric(key, t)
+	case string:
+		sp.SetMeta(key, t)
+	case []byte:
+		sp.SetMeta(key, string(t))
 	default:
-		sp.Meta[key] = fmt.Sprintf("%v", t)
+		sp.SetMeta(key, fmt.Sprintf("%#v", t))
 	}
 
 	return sp
@@ -183,40 +193,3 @@ func (sp *Span) LogEventWithPayload(event string, payload interface{}) {}
 
 // Deprecated: use LogFields or LogKV
 func (sp *Span) Log(data opentracing.LogData) {}
-
-// func splitTags(tags map[string]interface{}) (map[string]string, map[string]*Numeric) {
-// 	var (
-// 		meta    = make(map[string]string)
-// 		metrics = make(map[string]*Numeric)
-// 	)
-// 	for k, v := range tags {
-// 		switch t := v.(type) {
-// 		case string:
-// 			meta[k] = t
-// 		case []byte:
-// 			meta[k] = string(t)
-// 		case *Numeric:
-// 			metrics[k] = t
-// 		default:
-// 			meta[k] = fmt.Sprintf("%v", t)
-// 		}
-// 	}
-
-// 	return meta, metrics
-// }
-
-func WithSpanContext(spctx SpanContext) opentracing.SpanReference {
-	return opentracing.ChildOf(&spctx)
-}
-
-func WithSpanTags(tags map[string]interface{}) opentracing.Tags {
-	return tags
-}
-
-func WithStartTime(ts int64) opentracing.StartTime {
-	return opentracing.StartTime(time.Unix(0, ts))
-}
-
-func WithExternalTraceID(tid interface{}) *opentracing.Tag {
-	return &opentracing.Tag{Key: ExternalTraceID, Value: tid}
-}

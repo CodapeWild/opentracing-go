@@ -1,4 +1,4 @@
-package uniottrans
+package optcgo
 
 // Prefix for universal-opentracing-transformer key in k-v paris
 const Prefix = "uni-ot-"
